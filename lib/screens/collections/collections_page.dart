@@ -69,7 +69,7 @@ class _CollectionsPageState extends State<CollectionsPage> {
                   name: controller.text,
                   method: "GET",
                   url: "",
-                  headers: {},
+                  headersList: [],
                   body: "",
                 );
 

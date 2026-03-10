@@ -1,4 +1,5 @@
 import 'package:hive/hive.dart';
+import 'package:wire_touch/models/header_item.dart';
 
 part 'request_model.g.dart';
 
@@ -18,21 +19,21 @@ class RequestModel extends HiveObject {
   String url;
 
   @HiveField(4)
-  Map<String, String>? headers;
+List<HeaderItem>? headersList; 
 
   @HiveField(5)
   String? body;
 
   @HiveField(6)
-  Map<String, String>? queryParams;
+List<HeaderItem>? queryParamsList; 
 
   RequestModel({
     required this.id,
     required this.name,
     required this.method,
     required this.url,
-    this.headers,
+    this.headersList,
     this.body,
-    this.queryParams,
+    this.queryParamsList,
   });
 }

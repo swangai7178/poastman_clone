@@ -25,9 +25,9 @@ class _MainPageState extends State<MainPage> {
   }
 
   void loadProjects() async {
-    final loadedProjects = await hiveService.getProjects();
-    setState(() {
-      projects = loadedProjects;
+    final loadedProjects = hiveService.getProjects();
+    setState(() async {
+      projects = await loadedProjects;
     });
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:wire_touch/models/header_item.dart';
 
 import 'screens/main/main_page.dart';
 import 'models/project.dart';
@@ -16,6 +17,7 @@ void main() async {
   Hive.registerAdapter(ProjectAdapter());
   Hive.registerAdapter(CollectionAdapter());
   Hive.registerAdapter(RequestModelAdapter());
+  Hive.registerAdapter(HeaderItemAdapter());
 
   // Open boxes
   await Hive.openBox<Project>('projects');

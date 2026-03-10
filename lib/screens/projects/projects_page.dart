@@ -26,8 +26,8 @@ class _ProjectsPageState extends State<ProjectsPage> {
   }
 
   void loadProjects() {
-    setState(() {
-      projects = hiveService.getProjects();
+    setState(() async {
+      projects = await hiveService.getProjects();
     });
   }
 
@@ -67,7 +67,7 @@ class _ProjectsPageState extends State<ProjectsPage> {
                   collections: [],
                 );
 
-                await hiveService.createProject(project);
+                await hiveService.addProject(project);
 
                 Navigator.pop(context);
 
