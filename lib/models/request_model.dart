@@ -23,6 +23,9 @@ class RequestModel extends HiveObject {
   @HiveField(5)
   String? body;
 
+  @HiveField(6)
+  Map<String, String>? queryParams;
+
   RequestModel({
     required this.id,
     required this.name,
@@ -30,5 +33,6 @@ class RequestModel extends HiveObject {
     required this.url,
     this.headers,
     this.body,
+    this.queryParams,
   });
 }
