@@ -23,13 +23,14 @@ class RequestModelAdapter extends TypeAdapter<RequestModel> {
       url: fields[3] as String,
       headersList: (fields[4] as List?)?.cast<HeaderItem>(),
       body: fields[5] as String?,
+      queryParamsList: (fields[6] as List?)?.cast<HeaderItem>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, RequestModel obj) {
     writer
-      ..writeByte(6)
+      ..writeByte(7)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -41,7 +42,9 @@ class RequestModelAdapter extends TypeAdapter<RequestModel> {
       ..writeByte(4)
       ..write(obj.headersList)
       ..writeByte(5)
-      ..write(obj.body);
+      ..write(obj.body)
+      ..writeByte(6)
+      ..write(obj.queryParamsList);
   }
 
   @override

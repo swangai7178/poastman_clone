@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:uuid/uuid.dart';
-
-import '../../core/services/hive_service.dart';
+import 'package:wire_touch/screens/main/request_widget.dart';
+import 'package:wire_touch/screens/main/sidebar.dart';
 import '../../models/project.dart';
+import '../../models/request_model.dart';
+import '../../core/services/hive_service.dart';// The editor widget we discussed
 
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
@@ -12,190 +13,137 @@ class MainPage extends StatefulWidget {
 }
 
 class _MainPageState extends State<MainPage> {
-  final hiveService = HiveService();
-  final uuid = const Uuid();
-
-  List<Project> projects = [];
-  Project? selectedProject; // Track which project is active in the workspace
+  final HiveService _hiveService = HiveService();
+  List<Project> _projects = [];
+  RequestModel? _activeRequest;
+  bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    loadProjects();
+    _loadData();
   }
 
-  // FIXED: Await the data BEFORE calling setState
-  void loadProjects() async {
-    final loadedProjects = await hiveService.getProjects();
+  Future<void> _loadData() async {
+    final data = await _hiveService.getProjects();
     setState(() {
-      projects = loadedProjects;
+      _projects = data;
+      _isLoading = false;
     });
   }
 
-  void createProject() async {
-    TextEditingController controller = TextEditingController();
-
-    await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text("New Project"),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: "Project Name"),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cancel"),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              if (controller.text.trim().isEmpty) return;
-
-              final project = Project(
-                id: uuid.v4(),
-                name: controller.text.trim(),
-                collections: [],
-              );
-
-              await hiveService.addProject(project);
-              
-              setState(() {
-                projects.add(project);
-              });
-
-              Navigator.pop(context);
-            },
-            child: const Text("Create"),
-          ),
-        ],
-      ),
-    );
+  void _handleRequestSelected(RequestModel request) {
+    setState(() {
+      _activeRequest = request;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Row(
-        children: [
-          // --- LEFT SIDEBAR ---
-          Container(
-            width: 300,
-            color: Theme.of(context).cardColor,
-            child: Column(
+      // The AppBar is kept minimal like Postman
+      appBar: AppBar(
+        title: const Text("WIRE TOUCH", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        elevation: 1,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () {},
+          ),
+        ],
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Row(
               children: [
-                _buildSidebarHeader(),
-                const Divider(height: 1),
-                Expanded(child: _buildProjectList()),
+                // --- SIDEBAR AREA ---
+               Container(
+  width: 300,
+  decoration: BoxDecoration(
+    color: Theme.of(context).cardColor,
+    // Using the built-in theme divider color
+    border: Border(
+      right: BorderSide(color: Theme.of(context).dividerColor),
+    ),
+  ),
+  child: Column(
+    children: [
+      _buildSidebarActions(),
+      const Divider(height: 1),
+      Expanded(
+        child: ProjectSidebar(
+          projects: _projects,
+          onRequestSelected: _handleRequestSelected,
+          onRefresh: _loadData,
+        ),
+      ),
+    ],
+  ),
+),
+
+                // --- MAIN WORKSPACE AREA ---
+                Expanded(
+                  child: _activeRequest == null
+                      ? _buildEmptyState()
+                      : RequestEditor(
+                          key: ValueKey(_activeRequest!.id),
+                          request: _activeRequest!,
+                        ),
+                ),
               ],
             ),
-          ),
-
-          // --- VERTICAL DIVIDER ---
-          const VerticalDivider(width: 1, thickness: 1),
-
-          // --- MAIN WORKSPACE ---
-          Expanded(
-            child: selectedProject == null
-                ? _buildEmptyState()
-                : _buildProjectWorkspace(selectedProject!),
-          ),
-        ],
-      ),
     );
   }
 
-  Widget _buildSidebarHeader() {
+  Widget _buildSidebarActions() {
     return Padding(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          const Text(
-            "WIRE TOUCH",
-            style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.2),
-          ),
+          const Text("Collections", style: TextStyle(fontWeight: FontWeight.w600)),
+          const Spacer(),
           IconButton(
-            onPressed: createProject,
-            icon: const Icon(Icons.add_box_outlined, size: 20),
-            tooltip: "New Project",
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProjectList() {
-    if (projects.isEmpty) {
-      return const Center(child: Text("No projects found"));
-    }
-
-    return ListView.builder(
-      itemCount: projects.length,
-      itemBuilder: (context, index) {
-        final project = projects[index];
-        return ExpansionTile(
-          key: PageStorageKey(project.id),
-          leading: const Icon(Icons.folder, size: 20, color: Colors.amber),
-          title: Text(project.name, style: const TextStyle(fontSize: 14)),
-          trailing: IconButton(
-            icon: const Icon(Icons.more_vert, size: 18),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.create_new_folder_outlined, size: 20),
             onPressed: () {
-              // Add project options menu (delete/rename) here
+              // Logic to create a new top-level Project
             },
           ),
-          children: [
-            // Nested Collections/Requests
-            ...project.collections.map((col) => ListTile(
-                  contentPadding: const EdgeInsets.only(left: 48),
-                  title: Text(col.name, style: const TextStyle(fontSize: 13)),
-                  onTap: () {
-                    setState(() => selectedProject = project);
-                  },
-                )),
-            ListTile(
-              contentPadding: const EdgeInsets.only(left: 48),
-              leading: const Icon(Icons.add, size: 16),
-              title: const Text("Add Request", style: TextStyle(fontSize: 12)),
-              onTap: () {
-                // Logic to add a new request to this project
-              },
-            )
-          ],
-        );
-      },
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.file_download_outlined, size: 20),
+            onPressed: () async {
+              // Import Logic here
+              _loadData(); 
+            },
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildEmptyState() {
-    return const Center(
+    return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.lan_outlined, size: 64, color: Colors.grey),
-          SizedBox(height: 16),
-          Text("Select a project or request to view details"),
+          Icon(Icons.rocket_launch_outlined, size: 80, color: Colors.grey.withOpacity(0.5)),
+          const SizedBox(height: 20),
+          const Text(
+            "Select a request from the sidebar\nor create a new one to begin testing.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildProjectWorkspace(Project project) {
-    return Column(
-      children: [
-        AppBar(
-          title: Text(project.name),
-          elevation: 0,
-          backgroundColor: Colors.transparent,
-          foregroundColor: Theme.of(context).textTheme.bodyLarge?.color,
-        ),
-        const Expanded(
-          child: Center(
-            child: Text("Request Editor Goes Here (Method, URL, Headers, etc.)"),
-          ),
-        ),
-      ],
-    );
-  }
+// Extension to handle theme-based divider colors easily
+extension ContextExt on BuildContext {
+  Color dividerColor(BuildContext context) => 
+      Theme.of(context).brightness == Brightness.light 
+          ? Colors.grey.shade300 
+          : Colors.grey.shade800;
 }
