@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -35,90 +34,167 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        border: Border(right: BorderSide(color: Colors.white.withOpacity(0.05))),
+        border: Border(right: BorderSide(color: Colors.white12.withOpacity(0.05))),
       ),
       child: ListView.builder(
         itemCount: widget.projects.length,
-        itemBuilder: (context, index) => _buildProjectSection(widget.projects[index]),
+        itemBuilder: (context, index) => _buildProjectNode(widget.projects[index]),
       ),
     );
   }
 
-  // --- PROJECT SECTION ---
-  Widget _buildProjectSection(Project project) {
+  // --- UI TREE BUILDING ---
+
+  Widget _buildProjectNode(Project project) {
     return ExpansionTile(
       key: PageStorageKey('proj_${project.id}'),
       initiallyExpanded: true,
-      leading: const Icon(Icons.account_tree_outlined, size: 18, color: Colors.blueAccent),
+      leading: const Icon(Icons.inventory_2_outlined, size: 18, color: Colors.blueAccent),
       title: Text(
         project.name.toUpperCase(),
-        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.1),
       ),
-      trailing: PopupMenuButton<String>(
-        icon: const Icon(Icons.more_vert, size: 18),
-        onSelected: (val) => _handleProjectAction(val, project),
-        itemBuilder: (context) => [
-          const PopupMenuItem(value: 'import', child: Text("Import Collection")),
-          const PopupMenuItem(value: 'delete', child: Text("Delete Project", style: TextStyle(color: Colors.red))),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildActionIcon(Icons.file_upload_outlined, "Import Postman", () => _importPostman(project)),
+          _buildActionIcon(Icons.delete_outline, "Delete Project", () => _deleteProject(project.id)),
         ],
       ),
-      children: project.collections.map((col) => _buildCollectionNode(project, col)).toList(),
+      // Only show top-level collections (those without a parent_id)
+      children: project.collections
+          .where((c) => c.parentId == null)
+          .map((col) => _buildRecursiveFolder(project, col))
+          .toList(),
     );
   }
 
-  // --- COLLECTION NODE ---
-  Widget _buildCollectionNode(Project project, Collection collection) {
+  Widget _buildRecursiveFolder(Project project, Collection folder) {
     return ExpansionTile(
-      key: PageStorageKey('col_${collection.id}'),
-      tilePadding: const EdgeInsets.only(left: 12, right: 8),
+      key: PageStorageKey('folder_${folder.id}'),
+      tilePadding: const EdgeInsets.only(left: 16, right: 8),
       leading: const Icon(Icons.folder_outlined, size: 18, color: Colors.amber),
-      title: Text(collection.name, style: const TextStyle(fontSize: 13)),
-      trailing: IconButton(
-        icon: const Icon(Icons.delete_outline, size: 16, color: Colors.grey),
-        onPressed: () => _deleteCollection(collection.id),
-      ),
+      title: Text(folder.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+      trailing: _buildActionIcon(Icons.delete_outline, "Delete Folder", () => _deleteCollection(folder.id)),
       children: [
-        ...collection.requests.map((req) => _buildRequestItem(project, req)),
+        // 1. Render Subfolders (Recursive Call)
+        ...folder.subFolders.map((sub) => _buildRecursiveFolder(project, sub)),
+        
+        // 2. Render Requests belonging to this folder level
+        ...folder.requests.map((req) => _buildRequestLeaf(project, req)),
       ],
     );
   }
 
-  // --- REQUEST ITEM ---
-  Widget _buildRequestItem(Project project, RequestModel request) {
-    return InkWell(
-      onTap: () => widget.onRequestSelected(project, request),
-      child: Padding(
-        padding: const EdgeInsets.only(left: 32, top: 6, bottom: 6, right: 12),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 35,
-              child: Text(
-                request.method,
-                style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: _getMethodColor(request.method)),
-              ),
-            ),
-            Expanded(
-              child: Text(
-                request.name,
-                style: const TextStyle(fontSize: 12, overflow: TextOverflow.ellipsis),
-              ),
-            ),
-          ],
+  Widget _buildRequestLeaf(Project project, RequestModel request) {
+    return ListTile(
+      contentPadding: const EdgeInsets.only(left: 48, right: 12),
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      leading: SizedBox(
+        width: 35,
+        child: Text(
+          request.method,
+          style: TextStyle(
+            fontSize: 9, 
+            fontWeight: FontWeight.bold, 
+            color: _getMethodColor(request.method)
+          ),
         ),
       ),
+      title: Text(
+        request.name, 
+        style: const TextStyle(fontSize: 12),
+        overflow: TextOverflow.ellipsis,
+      ),
+      onTap: () => widget.onRequestSelected(project, request),
     );
   }
 
-  // --- LOGIC: DELETION & IMPORT ---
+  // --- ACTIONS & RECURSIVE IMPORT ---
 
-  void _handleProjectAction(String action, Project project) {
-    if (action == 'import') {
-      _importCollection(project);
-    } else if (action == 'delete') {
-      _deleteProject(project.id);
+  Future<void> _importPostman(Project project) async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom, allowedExtensions: ['json']
+      );
+      if (result == null) return;
+
+      final content = kIsWeb 
+          ? utf8.decode(result.files.single.bytes!) 
+          : await File(result.files.single.path!).readAsString();
+
+      final Map<String, dynamic> data = json.decode(content);
+      final db = await DatabaseService.instance.database;
+
+      await db.transaction((txn) async {
+        // Create root collection node for the import
+        final rootId = uuid.v4();
+        await txn.insert('collections', {
+          'id': rootId,
+          'project_id': project.id,
+          'name': data['info']?['name'] ?? "Imported Collection",
+          'parent_id': null,
+        });
+
+        // Start recursion through the "item" array
+        await _saveItemsRecursive(txn, project.id, rootId, data['item'] ?? []);
+      });
+
+      widget.onRefresh();
+    } catch (e) {
+      debugPrint("Import Error: $e");
     }
   }
+
+  Future<void> _saveItemsRecursive(
+    dynamic txn, String projId, String parentId, List<dynamic> items
+  ) async {
+    for (var item in items) {
+      if (item['item'] != null) {
+        // THIS IS A FOLDER
+        final folderId = uuid.v4();
+        await txn.insert('collections', {
+          'id': folderId,
+          'project_id': projId,
+          'name': item['name'],
+          'parent_id': parentId, // Links this folder to the parent
+        });
+        // Go deeper
+        await _saveItemsRecursive(txn, projId, folderId, item['item']);
+      } else if (item['request'] != null) {
+        // THIS IS AN API REQUEST
+        final req = item['request'];
+        
+        // Handle URL (Postman URLs can be strings or maps)
+        String urlString = "";
+        if (req['url'] is Map) {
+          urlString = req['url']['raw'] ?? "";
+        } else {
+          urlString = req['url']?.toString() ?? "";
+        }
+
+        // Extract JSON Body
+        String bodyString = "";
+        if (req['body'] != null && req['body']['mode'] == 'raw') {
+          bodyString = req['body']['raw'] ?? "";
+        }
+
+        await txn.insert('requests', {
+          'id': uuid.v4(),
+          'collection_id': parentId,
+          'name': item['name'],
+          'method': (req['method'] ?? "GET").toString().toUpperCase(),
+          'url': urlString,
+          'body': bodyString,
+          'headers': json.encode(req['header'] ?? []),
+          'query_params': '[]',
+        });
+      }
+    }
+  }
+
+  // --- DATABASE HELPERS ---
 
   Future<void> _deleteProject(String id) async {
     final db = await DatabaseService.instance.database;
@@ -132,72 +208,15 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     widget.onRefresh();
   }
 
-  Future<void> _importCollection(Project project) async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
-      );
-      if (result == null) return;
-
-      final content = kIsWeb 
-          ? utf8.decode(result.files.single.bytes!) 
-          : await File(result.files.single.path!).readAsString();
-
-      final Map<String, dynamic> data = json.decode(content);
-      await _savePostmanCollection(project.id, data);
-      widget.onRefresh();
-    } catch (e) {
-      debugPrint("Import Error: $e");
-    }
+  Widget _buildActionIcon(IconData icon, String tooltip, VoidCallback onTap) {
+    return IconButton(
+      icon: Icon(icon, size: 16, color: Colors.grey),
+      tooltip: tooltip,
+      constraints: const BoxConstraints(),
+      padding: const EdgeInsets.all(8),
+      onPressed: onTap,
+    );
   }
-
-  Future<void> _savePostmanCollection(String projectId, Map<String, dynamic> data) async {
-    final db = await DatabaseService.instance.database;
-    final colId = uuid.v4();
-
-    await db.transaction((txn) async {
-      await txn.insert('collections', {
-        'id': colId,
-        'project_id': projectId,
-        'name': data['info']?['name'] ?? "Imported Collection",
-      });
-
-      await _processItemsRecursive(txn, colId, data['item'] ?? []);
-    });
-  }
-
-  Future<void> _processItemsRecursive(dynamic txn, String colId, List<dynamic> items, [String folderName = ""]) async {
-    for (var item in items) {
-      if (item['item'] != null) {
-        // Recurse into folders (e.g., Auth, Manifest)
-        // We pass the folder name so requests show as "Auth / Login"
-        String currentPath = folderName.isEmpty ? item['name'] : "$folderName / ${item['name']}";
-        await _processItemsRecursive(txn, colId, item['item'], currentPath);
-      } else if (item['request'] != null) {
-        final req = item['request'];
-        
-        // Extract Body
-        String bodyText = "";
-        if (req['body'] != null && req['body']['mode'] == 'raw') {
-          bodyText = req['body']['raw'] ?? "";
-        }
-
-        await txn.insert('requests', {
-          'id': uuid.v4(),
-          'collection_id': colId,
-          'name': folderName.isEmpty ? item['name'] : "$folderName / ${item['name']}",
-          'method': (req['method'] ?? "GET").toString().toUpperCase(),
-          'url': req['url'] is Map ? (req['url']['raw'] ?? "") : (req['url'] ?? ""),
-          'headers': json.encode(req['header'] ?? []),
-          'body': bodyText,
-          'query_params': '[]',
-        });
-      }
-    }
-  }
-
-  // --- HELPERS ---
 
   Color _getMethodColor(String method) {
     switch (method.toUpperCase()) {
@@ -205,6 +224,7 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
       case "POST": return Colors.blue;
       case "PUT": return Colors.orange;
       case "DELETE": return Colors.red;
+      case "PATCH": return Colors.purple;
       default: return Colors.grey;
     }
   }

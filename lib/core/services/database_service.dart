@@ -35,11 +35,12 @@ class DatabaseService {
 
     await db.execute('''
       CREATE TABLE collections (
-        id TEXT PRIMARY KEY,
-        project_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
-      )
+  id TEXT PRIMARY KEY,
+  project_id TEXT,
+  parent_id TEXT, -- Allows a collection to be a child of another collection
+  name TEXT,
+  FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
+);
     ''');
 
     await db.execute('''
