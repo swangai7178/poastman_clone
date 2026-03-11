@@ -191,8 +191,11 @@ class _RequestEditorState extends State<RequestEditor> {
           child: Row(
             children: [
               _buildCell(item.key, "Key", (v) {
-                if (isLast && v.isNotEmpty) setState(() => items.add(HeaderItem(key: v, value: '')));
-                else item.key = v;
+                if (isLast && v.isNotEmpty) {
+                  setState(() => items.add(HeaderItem(key: v, value: '')));
+                } else {
+                  item.key = v;
+                }
                 _saveRequest();
               }),
               const VerticalDivider(width: 1),
@@ -301,8 +304,9 @@ class _RequestEditorState extends State<RequestEditor> {
       final headers = {for (var h in widget.request.headersList!) if (h.key.isNotEmpty) h.key: h.value};
       
       http.Response res;
-      if (widget.request.method == "POST") res = await http.post(uri, headers: headers, body: _bodyController.text);
-      else if (widget.request.method == "PUT") res = await http.put(uri, headers: headers, body: _bodyController.text);
+      if (widget.request.method == "POST") {
+        res = await http.post(uri, headers: headers, body: _bodyController.text);
+      } else if (widget.request.method == "PUT") res = await http.put(uri, headers: headers, body: _bodyController.text);
       else if (widget.request.method == "DELETE") res = await http.delete(uri, headers: headers);
       else res = await http.get(uri, headers: headers);
 

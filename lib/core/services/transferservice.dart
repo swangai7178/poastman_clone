@@ -17,8 +17,9 @@ class TransferService {
         final String jsonString = jsonEncode(project);
         await file.writeAsString(jsonString);
       }
+    // ignore: empty_catches
     } catch (e) {
-      print("Export failed: $e");
+ 
     }
   }
 
@@ -38,7 +39,7 @@ class TransferService {
         return Project.fromMap(jsonData);
       }
     } catch (e) {
-      print("Import failed: $e");
+    
     }
     return null;
   }

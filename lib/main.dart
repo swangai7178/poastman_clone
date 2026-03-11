@@ -1,8 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:flutter/foundation.dart';
 import 'package:wire_touch/screens/main/main_page.dart';
 
 void main() {

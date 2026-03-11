@@ -78,14 +78,14 @@ class _MainPageState extends State<MainPage> {
 
   // Logic to create a new top-level Project in SQLite
   Future<void> _createNewProject() async {
-    final TextEditingController _nameController = TextEditingController();
+    final TextEditingController nameController = TextEditingController();
     
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Create New Project"),
         content: TextField(
-          controller: _nameController,
+          controller: nameController,
           decoration: const InputDecoration(hintText: "Enter project name"),
           autofocus: true,
         ),
@@ -93,11 +93,11 @@ class _MainPageState extends State<MainPage> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () async {
-              if (_nameController.text.isNotEmpty) {
+              if (nameController.text.isNotEmpty) {
                 final db = await DatabaseService.instance.database;
                 await db.insert('projects', {
                   'id': _uuid.v4(),
-                  'name': _nameController.text,
+                  'name': nameController.text,
                 });
                 Navigator.pop(context);
                 _loadData(); // Refresh the list
