@@ -293,57 +293,33 @@ class _RequestEditorState extends State<RequestEditor> {
 
   // --- NETWORK ---
 
- Future<void> _sendRequest() async {
-  setState(() => _isSending = true);
-  final sw = Stopwatch()..start();
-  
-  try {
-    final uri = Uri.parse(_urlController.text);
-    
-    // 1. Prepare Headers (Crucial for Rails)
-    final Map<String, String> headers = {
-      for (var h in widget.request.headersList!) if (h.key.isNotEmpty) h.key: h.value,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-    };
-
-    // 2. Prepare Body (Must be a JSON string)
-    final String requestBody = _bodyController.text.trim();
-
-    http.Response res;
-    
-    // 3. Execute with dynamic method handling
-    switch (widget.request.method.toUpperCase()) {
-      case "POST":
-        res = await http.post(uri, headers: headers, body: requestBody);
-        break;
-      case "PUT":
-        res = await http.put(uri, headers: headers, body: requestBody);
-        break;
-      case "DELETE":
-        res = await http.delete(uri, headers: headers);
-        break;
-      default: // GET
-        res = await http.get(uri, headers: headers);
-    }
-
-    // 4. Handle Response
-    _statusCode = res.statusCode;
-    _responseTime = "${sw.elapsedMilliseconds}ms";
-    
+  Future<void> _sendRequest() async {
+    setState(() => _isSending = true);
+    final sw = Stopwatch()..start();
     try {
-      final decoded = json.decode(res.body);
-      _responseBody = const JsonEncoder.withIndent('  ').convert(decoded);
-    } catch (_) {
-      _responseBody = res.body;
+      final uri = Uri.parse(_urlController.text);
+      final headers = {for (var h in widget.request.headersList!) if (h.key.isNotEmpty) h.key: h.value};
+      
+      http.Response res;
+      if (widget.request.method == "POST") res = await http.post(uri, headers: headers, body: _bodyController.text);
+      else if (widget.request.method == "PUT") res = await http.put(uri, headers: headers, body: _bodyController.text);
+      else if (widget.request.method == "DELETE") res = await http.delete(uri, headers: headers);
+      else res = await http.get(uri, headers: headers);
+
+      _statusCode = res.statusCode;
+      _responseTime = "${sw.elapsedMilliseconds}ms";
+      try {
+        _responseBody = const JsonEncoder.withIndent('  ').convert(json.decode(res.body));
+      } catch (_) {
+        _responseBody = res.body;
+      }
+    } catch (e) {
+      _responseBody = e.toString();
+      _statusCode = 500;
+    } finally {
+      setState(() => _isSending = false);
     }
-  } catch (e) {
-    _responseBody = "Connection Error: ${e.toString()}";
-    _statusCode = 0;
-  } finally {
-    setState(() => _isSending = false);
   }
-}
 
   Color _getMethodColor(String m) {
     switch (m) {
