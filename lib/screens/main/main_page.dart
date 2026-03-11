@@ -18,6 +18,17 @@ class _MainPageState extends State<MainPage> {
   RequestModel? _activeRequest;
   bool _isLoading = true;
 
+  // Inside _MainPageState
+
+Project? _activeProject; // Add this to track the parent
+
+void _handleRequestSelected(Project project, RequestModel request) {
+  setState(() {
+    _activeProject = project;
+    _activeRequest = request;
+  });
+}
+
   @override
   void initState() {
     super.initState();
@@ -31,13 +42,9 @@ class _MainPageState extends State<MainPage> {
       _isLoading = false;
     });
   }
+  
 
-  void _handleRequestSelected(RequestModel request) {
-    setState(() {
-      _activeRequest = request;
-    });
-  }
-
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -83,13 +90,19 @@ class _MainPageState extends State<MainPage> {
 
                 // --- MAIN WORKSPACE AREA ---
                 Expanded(
-                  child: _activeRequest == null
-                      ? _buildEmptyState()
-                      : RequestEditor(
-                          key: ValueKey(_activeRequest!.id),
-                          request: _activeRequest!,
-                        ),
-                ),
+  child: _activeRequest == null || _activeProject == null
+      ? _buildEmptyState()
+      : RequestEditor(
+          key: ValueKey(_activeRequest!.id),
+          request: _activeRequest!,
+          onSave: () {
+            // This is the fix: Save the root project object
+            // which is the one actually connected to the Hive box.
+            _activeProject!.save(); 
+            debugPrint("Data persisted to Hive for: ${_activeProject!.name}");
+          },
+        ),
+),
               ],
             ),
     );

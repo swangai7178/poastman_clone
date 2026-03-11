@@ -4,8 +4,13 @@ import '../../models/header_item.dart';
 
 class RequestEditor extends StatefulWidget {
   final RequestModel request;
+  final VoidCallback onSave; // The callback to trigger the parent Project.save()
 
-  const RequestEditor({super.key, required this.request});
+  const RequestEditor({
+    super.key, 
+    required this.request, 
+    required this.onSave
+  });
 
   @override
   State<RequestEditor> createState() => _RequestEditorState();
@@ -21,7 +26,7 @@ class _RequestEditorState extends State<RequestEditor> {
     _urlController = TextEditingController(text: widget.request.url);
     _bodyController = TextEditingController(text: widget.request.body);
     
-    // Ensure lists are initialized so we don't hit null errors in the UI
+    // Ensure nested lists aren't null for UI rendering
     widget.request.headersList ??= [];
     widget.request.queryParamsList ??= [];
   }
@@ -33,7 +38,12 @@ class _RequestEditorState extends State<RequestEditor> {
     super.dispose();
   }
 
-  // --- LOGIC: SYNC PARAMS AND URL ---
+  // FIXED: Instead of request.save(), we use the callback
+  void _saveRequest() {
+    widget.request.url = _urlController.text;
+    widget.request.body = _bodyController.text;
+    widget.onSave(); // This tells the parent Project to save to Hive
+  }
 
   void _onUrlChanged(String value) {
     widget.request.url = value;
@@ -46,9 +56,7 @@ class _RequestEditorState extends State<RequestEditor> {
               .toList();
         });
       }
-    } catch (_) {
-      // Handle invalid URI gracefully
-    }
+    } catch (_) {}
     _saveRequest();
   }
 
@@ -70,20 +78,11 @@ class _RequestEditorState extends State<RequestEditor> {
     } catch (_) {}
   }
 
-  void _saveRequest() {
-    widget.request.url = _urlController.text;
-    widget.request.body = _bodyController.text;
-    widget.request.save(); // Persist to Hive
-  }
-
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // --- 1. ADDRESS BAR ---
         _buildAddressBar(),
-
-        // --- 2. TABS SECTION ---
         Expanded(
           child: DefaultTabController(
             length: 3,
@@ -91,14 +90,7 @@ class _RequestEditorState extends State<RequestEditor> {
               children: [
                 const TabBar(
                   isScrollable: true,
-                  labelColor: Colors.blue,
-                  unselectedLabelColor: Colors.grey,
-                  indicatorSize: TabBarIndicatorSize.label,
-                  tabs: [
-                    Tab(text: "Params"),
-                    Tab(text: "Headers"),
-                    Tab(text: "Body"),
-                  ],
+                  tabs: [Tab(text: "Params"), Tab(text: "Headers"), Tab(text: "Body")],
                 ),
                 const Divider(height: 1),
                 Expanded(
@@ -145,25 +137,18 @@ class _RequestEditorState extends State<RequestEditor> {
             child: TextField(
               controller: _urlController,
               onChanged: _onUrlChanged,
-              decoration: InputDecoration(
-                hintText: "https://api.example.com/v1/resource",
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.zero,
-                  borderSide: BorderSide(color: Colors.grey.shade300),
-                ),
+              decoration: const InputDecoration(
+                hintText: "https://api.example.com",
+                border: OutlineInputBorder(borderRadius: BorderRadius.zero),
               ),
             ),
           ),
           ElevatedButton(
-            onPressed: _saveRequest,
+            onPressed: () => _saveRequest(), 
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blueAccent,
               foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 19),
-              shape: const RoundedRectangleBorder(
-                borderRadius: BorderRadius.only(topRight: Radius.circular(4), bottomRight: Radius.circular(4)),
-              ),
             ),
             child: const Text("Send"),
           ),
@@ -179,67 +164,50 @@ class _RequestEditorState extends State<RequestEditor> {
         final bool isNewRow = index == items.length;
         final item = isNewRow ? HeaderItem(key: '', value: '') : items[index];
 
-        return Container(
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.shade200))),
-          child: Row(
-            children: [
-              _buildTableField(item.key, "Key", (val) {
-                if (isNewRow && val.isNotEmpty) {
-                  setState(() => items.add(HeaderItem(key: val, value: '')));
-                } else {
-                  item.key = val;
-                }
-                isParams ? _syncUrlFromParams() : _saveRequest();
-              }),
-              const VerticalDivider(width: 1),
-              _buildTableField(item.value, "Value", (val) {
-                item.value = val;
-                isParams ? _syncUrlFromParams() : _saveRequest();
-              }),
-              IconButton(
-                icon: const Icon(Icons.close, size: 16),
-                onPressed: isNewRow ? null : () {
-                  setState(() => items.removeAt(index));
+        return Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: TextEditingController(text: item.key)..selection = TextSelection.collapsed(offset: item.key.length),
+                decoration: const InputDecoration(hintText: "Key", contentPadding: EdgeInsets.all(12)),
+                onChanged: (val) {
+                  if (isNewRow && val.isNotEmpty) {
+                    setState(() => items.add(HeaderItem(key: val, value: '')));
+                  } else {
+                    item.key = val;
+                  }
                   isParams ? _syncUrlFromParams() : _saveRequest();
                 },
               ),
-            ],
-          ),
+            ),
+            Expanded(
+              child: TextField(
+                controller: TextEditingController(text: item.value)..selection = TextSelection.collapsed(offset: item.value.length),
+                decoration: const InputDecoration(hintText: "Value", contentPadding: EdgeInsets.all(12)),
+                onChanged: (val) {
+                  item.value = val;
+                  isParams ? _syncUrlFromParams() : _saveRequest();
+                },
+              ),
+            ),
+            if (!isNewRow) IconButton(icon: const Icon(Icons.close, size: 16), onPressed: () {
+              setState(() => items.removeAt(index));
+              isParams ? _syncUrlFromParams() : _saveRequest();
+            }),
+          ],
         );
       },
     );
   }
 
-  Widget _buildTableField(String initialValue, String hint, Function(String) onChanged) {
-    return Expanded(
-      child: TextField(
-        controller: TextEditingController(text: initialValue)
-          ..selection = TextSelection.collapsed(offset: initialValue.length),
-        onChanged: onChanged,
-        decoration: InputDecoration(
-          hintText: hint,
-          contentPadding: const EdgeInsets.all(12),
-          border: InputBorder.none,
-        ),
-      ),
-    );
-  }
-
   Widget _buildBodyEditor() {
-    return Container(
-      padding: const EdgeInsets.all(8),
-      color: Colors.grey.shade50,
-      child: TextField(
-        controller: _bodyController,
-        onChanged: (_) => _saveRequest(),
-        maxLines: null,
-        expands: true,
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-        decoration: const InputDecoration(
-          hintText: '{ "key": "value" }',
-          border: InputBorder.none,
-        ),
-      ),
+    return TextField(
+      controller: _bodyController,
+      maxLines: null,
+      expands: true,
+      onChanged: (_) => _saveRequest(),
+      style: const TextStyle(fontFamily: 'monospace'),
+      decoration: const InputDecoration(hintText: '{ "json": "here" }', contentPadding: EdgeInsets.all(12)),
     );
   }
 }

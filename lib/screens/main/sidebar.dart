@@ -7,7 +7,8 @@ import '../../models/request_model.dart';// The Export logic we built
 
 class ProjectSidebar extends StatefulWidget {
   final List<Project> projects;
-  final Function(RequestModel) onRequestSelected;
+  // Change this line:
+  final Function(Project, RequestModel) onRequestSelected; 
   final VoidCallback onRefresh;
 
   const ProjectSidebar({
@@ -20,7 +21,6 @@ class ProjectSidebar extends StatefulWidget {
   @override
   State<ProjectSidebar> createState() => _ProjectSidebarState();
 }
-
 class _ProjectSidebarState extends State<ProjectSidebar> {
   final uuid = const Uuid();
 
@@ -50,35 +50,38 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
   }
 
   // 2. COLLECTION LEVEL
-  Widget _buildCollectionTile(Project project, Collection collection) {
-    return ExpansionTile(
-      key: PageStorageKey(collection.id),
-      tilePadding: const EdgeInsets.only(left: 32, right: 16),
-      leading: const Icon(Icons.folder_open, size: 18, color: Colors.amber),
-      title: Text(collection.name, style: const TextStyle(fontSize: 14)),
-      children: [
-        ...collection.requests.map((req) => _buildRequestTile(req)),
-        _buildAddButton("Add Request", () => _addNewRequest(collection), indent: 48),
-      ],
-    );
-  }
+  // 1. Update the Collection Tile helper
+Widget _buildCollectionTile(Project project, Collection collection) {
+  return ExpansionTile(
+    key: PageStorageKey(collection.id),
+    title: Text(collection.name),
+    children: [
+      // Pass 'project' into the next helper
+      ...collection.requests.map((req) => _buildRequestTile(project, req)), 
+      _buildAddButton("Add Request", () => _addNewRequest(project, collection)),
+    ],
+  );
+}
 
-  // 3. REQUEST LEVEL (The Leaf Node)
-  Widget _buildRequestTile(RequestModel request) {
-    return ListTile(
-      contentPadding: const EdgeInsets.only(left: 56),
-      leading: Text(
-        request.method,
-        style: TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.bold,
-          color: _getMethodColor(request.method),
-        ),
+// 2. Update the Request Tile helper
+Widget _buildRequestTile(Project project, RequestModel request) {
+  return ListTile(
+    contentPadding: const EdgeInsets.only(left: 56),
+    leading: Text(
+      request.method,
+      style: TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.bold,
+        color: _getMethodColor(request.method),
       ),
-      title: Text(request.name, style: const TextStyle(fontSize: 13)),
-      onTap: () => widget.onRequestSelected(request),
-    );
-  }
+    ),
+    title: Text(request.name, style: const TextStyle(fontSize: 13)),
+    onTap: () {
+      // FIXED: Pass both the project and the request
+      widget.onRequestSelected(project, request);
+    },
+  );
+}
 
   // --- HELPER UI ELEMENTS ---
 
@@ -118,27 +121,34 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
   // --- LOGIC: ADDING ITEMS ---
 
   void _addNewCollection(Project project) {
-    setState(() {
-      project.collections.add(Collection(
-        id: uuid.v4(),
-        name: "New Collection",
-        requests: [],
-      ));
-    });
-    project.save(); // Persist to Hive
-  }
+  setState(() {
+    project.collections.add(Collection(
+      id: uuid.v4(),
+      name: "New Collection",
+      requests: [],
+    ));
+  });
 
-  void _addNewRequest(Collection collection) {
-    setState(() {
-      collection.requests.add(RequestModel(
-        id: uuid.v4(),
-        name: "New Request",
-        method: "GET",
-        url: "",
-      ));
-    });
-    collection.save(); // Persist to Hive
-  }
+  // Save the project which is the object in the box
+  project.save();
+}
+
+  // Update this signature in _ProjectSidebarState
+void _addNewRequest(Project project, Collection collection) {
+  final newRequest = RequestModel(
+    id: uuid.v4(),
+    name: "New Request",
+    method: "GET",
+    url: "",
+  );
+
+  setState(() {
+    collection.requests.add(newRequest);
+  });
+
+  // FIXED: Save the project root so Hive knows where to store the data
+  project.save(); 
+}
 
   Color _getMethodColor(String method) {
     switch (method.toUpperCase()) {
