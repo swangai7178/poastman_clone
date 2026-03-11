@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart'; // Required for kIsWeb
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -32,196 +32,136 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
 
   @override
   Widget build(BuildContext context) {
-    return ListView.builder(
-      itemCount: widget.projects.length,
-      itemBuilder: (context, index) {
-        final project = widget.projects[index];
-        return _buildProjectTile(project);
-      },
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        border: Border(right: BorderSide(color: Colors.white12.withOpacity(0.05))),
+      ),
+      child: ListView.builder(
+        itemCount: widget.projects.length,
+        itemBuilder: (context, index) => _buildProjectSection(widget.projects[index]),
+      ),
     );
   }
 
-  // --- UI COMPONENTS ---
-
-  Widget _buildProjectTile(Project project) {
+  Widget _buildProjectSection(Project project) {
     return ExpansionTile(
-      key: PageStorageKey(project.id),
-      leading: const Icon(Icons.workspaces_outline, size: 20, color: Colors.blueAccent),
-      title: Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+      key: PageStorageKey('proj_${project.id}'),
+      initiallyExpanded: true,
+      leading: const Icon(Icons.account_tree_outlined, size: 18, color: Colors.blueAccent),
+      title: Text(project.name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildActionIcon(Icons.file_upload_outlined, "Import", () => _importCollection(project)),
+        ],
+      ),
+      children: project.collections.map((col) => _buildCollectionNode(project, col)).toList(),
+    );
+  }
+
+  Widget _buildCollectionNode(Project project, Collection collection) {
+    return ExpansionTile(
+      key: PageStorageKey('col_${collection.id}'),
+      leading: const Icon(Icons.folder_open, size: 18, color: Colors.amber),
+      title: Text(collection.name, style: const TextStyle(fontSize: 13)),
       children: [
-        ...project.collections.map((col) => _buildCollectionTile(project, col)),
-        Padding(
-          padding: const EdgeInsets.only(right: 16.0),
-          child: Row(
-            children: [
-              Expanded(
-                child: _buildAddButton("Add Collection", () => _addNewCollection(project)),
-              ),
-              Tooltip(
-                message: "Import Collection (JSON)",
-                child: IconButton(
-                  icon: const Icon(Icons.file_upload_outlined, size: 18, color: Colors.blueGrey),
-                  onPressed: () => _importCollection(project),
-                ),
-              ),
-            ],
-          ),
-        ),
+        ...collection.requests.map((req) => _buildRequestItem(project, req)),
       ],
     );
   }
 
-  Widget _buildCollectionTile(Project project, Collection collection) {
-    return ExpansionTile(
-      key: PageStorageKey(collection.id),
-      title: Text(collection.name, style: const TextStyle(fontSize: 14)),
-      children: [
-        ...collection.requests.map((req) => _buildRequestTile(project, req)),
-        _buildAddButton("Add Request", () => _addNewRequest(project, collection), indent: 48),
-      ],
-    );
-  }
-
-  Widget _buildRequestTile(Project project, RequestModel request) {
-    return ListTile(
-      contentPadding: const EdgeInsets.only(left: 56),
-      leading: Text(
-        request.method,
-        style: TextStyle(
-          fontSize: 10, 
-          fontWeight: FontWeight.bold, 
-          color: _getMethodColor(request.method),
+  Widget _buildRequestItem(Project project, RequestModel request) {
+    return InkWell(
+      onTap: () => widget.onRequestSelected(project, request),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            const SizedBox(width: 24), // Indentation
+            SizedBox(
+              width: 38,
+              child: Text(
+                request.method,
+                style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: _getMethodColor(request.method)),
+              ),
+            ),
+            Expanded(child: Text(request.name, style: const TextStyle(fontSize: 12))),
+          ],
         ),
       ),
-      title: Text(request.name, style: const TextStyle(fontSize: 13)),
-      onTap: () => widget.onRequestSelected(project, request),
     );
   }
 
-  Widget _buildAddButton(String label, VoidCallback onTap, {double indent = 32}) {
-    return ListTile(
-      contentPadding: EdgeInsets.only(left: indent),
-      dense: true,
-      leading: const Icon(Icons.add, size: 16),
-      title: Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-      onTap: onTap,
-    );
-  }
-
-  // --- BUSINESS & SQL LOGIC ---
+  // --- RECURSIVE IMPORT LOGIC (Capturing the Body) ---
 
   Future<void> _importCollection(Project project) async {
-    try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
-      );
+    FilePickerResult? result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['json']);
+    if (result == null) return;
 
-      if (result == null) return;
+    final content = kIsWeb ? utf8.decode(result.files.single.bytes!) : await File(result.files.single.path!).readAsString();
+    final Map<String, dynamic> data = json.decode(content);
 
-      String content;
-      if (kIsWeb) {
-        // On Web, we use the bytes directly
-        content = utf8.decode(result.files.single.bytes!);
-      } else {
-        // On Desktop/Mobile, we use the file path
-        final file = File(result.files.single.path!);
-        content = await file.readAsString();
-      }
+    await _savePostmanCollection(project.id, data);
+    widget.onRefresh();
+  }
 
-      final dynamic decodedData = json.decode(content);
-      
-      // Support both single objects or lists of collections
-      if (decodedData is Map<String, dynamic>) {
-        await _saveImportedCollection(project.id, decodedData);
-      } else if (decodedData is List) {
-        for (var item in decodedData) {
-          await _saveImportedCollection(project.id, item as Map<String, dynamic>);
+  Future<void> _savePostmanCollection(String projectId, Map<String, dynamic> data) async {
+    final db = await DatabaseService.instance.database;
+    final colId = uuid.v4();
+
+    await db.transaction((txn) async {
+      await txn.insert('collections', {
+        'id': colId,
+        'project_id': projectId,
+        'name': data['info']?['name'] ?? "Imported Collection",
+      });
+
+      // Pass the folder name down to mimic hierarchy in the request name if needed
+      await _processItemsRecursive(txn, colId, data['item'] ?? []);
+    });
+  }
+
+  Future<void> _processItemsRecursive(dynamic txn, String colId, List<dynamic> items, [String prefix = ""]) async {
+    for (var item in items) {
+      if (item['item'] != null) {
+        // This is a folder, recurse into it
+        await _processItemsRecursive(txn, colId, item['item'], "${item['name']} / ");
+      } else if (item['request'] != null) {
+        final req = item['request'];
+        
+        // --- BODY EXTRACTION ---
+        String bodyText = "";
+        if (req['body'] != null && req['body']['mode'] == 'raw') {
+          bodyText = req['body']['raw'] ?? "";
         }
-      }
 
-      widget.onRefresh();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Import successful")),
-        );
-      }
-    } catch (e) {
-      debugPrint("Import Error: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red),
-        );
+        await txn.insert('requests', {
+          'id': uuid.v4(),
+          'collection_id': colId,
+          'name': "$prefix${item['name']}", // Includes folder names for clarity
+          'method': req['method'] ?? "GET",
+          'url': req['url'] is Map ? (req['url']['raw'] ?? "") : (req['url'] ?? ""),
+          'headers': json.encode(req['header'] ?? []),
+          'body': bodyText, // Make sure your SQL table has a 'body' column!
+          'query_params': '[]',
+        });
       }
     }
   }
 
-  Future<void> _saveImportedCollection(String projectId, Map<String, dynamic> data) async {
-    final db = await DatabaseService.instance.database;
-    final collectionId = uuid.v4();
-
-    // Perform as a transaction to ensure atomic updates
-    await db.transaction((txn) async {
-      await txn.insert('collections', {
-        'id': collectionId,
-        'project_id': projectId,
-        'name': data['name'] ?? data['info']?['name'] ?? "Imported Collection",
-      });
-
-      // Handle items/requests (matches standard Postman-like structures)
-      final List requests = data['item'] ?? data['requests'] ?? [];
-      for (var item in requests) {
-        final requestId = uuid.v4();
-        // Extracting request details safely
-        final reqData = item['request'] ?? item; 
-        
-        await txn.insert('requests', {
-          'id': requestId,
-          'collection_id': collectionId,
-          'name': item['name'] ?? "Unnamed Request",
-          'method': (reqData['method'] ?? "GET").toString().toUpperCase(),
-          'url': reqData['url'] is Map ? (reqData['url']['raw'] ?? "") : (reqData['url'] ?? ""),
-          'headers': json.encode(reqData['header'] ?? reqData['headers'] ?? []),
-          'query_params': json.encode(reqData['url'] is Map ? (reqData['url']['query'] ?? []) : []),
-        });
-      }
-    });
-  }
-
-  Future<void> _addNewCollection(Project project) async {
-    final db = await DatabaseService.instance.database;
-    await db.insert('collections', {
-      'id': uuid.v4(),
-      'project_id': project.id,
-      'name': "New Collection",
-    });
-    widget.onRefresh();
-  }
-
-  Future<void> _addNewRequest(Project project, Collection collection) async {
-    final db = await DatabaseService.instance.database;
-    await db.insert('requests', {
-      'id': uuid.v4(),
-      'collection_id': collection.id,
-      'name': "New Request",
-      'method': "GET",
-      'url': "",
-      'headers': '[]',
-      'query_params': '[]',
-    });
-    widget.onRefresh();
-  }
-
   // --- HELPERS ---
+
+  Widget _buildActionIcon(IconData icon, String tooltip, VoidCallback onTap) {
+    return IconButton(icon: Icon(icon, size: 16), tooltip: tooltip, onPressed: onTap, constraints: const BoxConstraints());
+  }
 
   Color _getMethodColor(String method) {
     switch (method.toUpperCase()) {
       case "GET": return Colors.green;
       case "POST": return Colors.blue;
-      case "PUT": return Colors.orange;
       case "DELETE": return Colors.red;
-      case "PATCH": return Colors.purple;
-      default: return Colors.grey;
+      default: return Colors.orange;
     }
   }
 }
