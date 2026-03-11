@@ -14,7 +14,7 @@ class TransferService {
 
       if (outputPath != null) {
         final file = File(outputPath);
-        final String jsonString = jsonEncode(project.toJson());
+        final String jsonString = jsonEncode(project);
         await file.writeAsString(jsonString);
       }
     } catch (e) {
@@ -35,7 +35,7 @@ class TransferService {
         final content = await file.readAsString();
         final Map<String, dynamic> jsonData = jsonDecode(content);
         
-        return Project.fromJson(jsonData);
+        return Project.fromMap(jsonData);
       }
     } catch (e) {
       print("Import failed: $e");

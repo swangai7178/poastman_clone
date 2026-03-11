@@ -1,16 +1,18 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:flutter/foundation.dart';
+import 'package:wire_touch/screens/main/main_page.dart';
 
-import 'screens/main/main_page.dart';
-import 'models/project.dart';
-
-void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
-
-
-  // 3. Open your Boxes
-  await Hive.openBox<Project>('projects');
-  await Hive.openBox('history');
+void main() {
+  // 1. Check if we are on Desktop (Windows, macOS, Linux)
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    // 2. Initialize FFI
+    sqfliteFfiInit();
+    // 3. Set the global databaseFactory to the FFI version
+    databaseFactory = databaseFactoryFfi;
+  }
 
   runApp(const WireTouchApp());
 }
