@@ -34,7 +34,7 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     return Container(
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
-        border: Border(right: BorderSide(color: Colors.white12.withOpacity(0.05))),
+        border: Border(right: BorderSide(color: Colors.white.withOpacity(0.05))),
       ),
       child: ListView.builder(
         itemCount: widget.projects.length,
@@ -57,11 +57,11 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          _buildActionIcon(Icons.create_new_folder_outlined, "New Root Folder", () => _showFolderDialog(project.id, null)),
           _buildActionIcon(Icons.file_upload_outlined, "Import Postman", () => _importPostman(project)),
           _buildActionIcon(Icons.delete_outline, "Delete Project", () => _deleteProject(project.id)),
         ],
       ),
-      // Only show top-level collections (those without a parent_id)
       children: project.collections
           .where((c) => c.parentId == null)
           .map((col) => _buildRecursiveFolder(project, col))
@@ -75,7 +75,14 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
       tilePadding: const EdgeInsets.only(left: 16, right: 8),
       leading: const Icon(Icons.folder_outlined, size: 18, color: Colors.amber),
       title: Text(folder.name, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
-      trailing: _buildActionIcon(Icons.delete_outline, "Delete Folder", () => _deleteCollection(folder.id)),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildActionIcon(Icons.add_box_outlined, "New API", () => _showRequestDialog(folder.id)),
+          _buildActionIcon(Icons.create_new_folder_outlined, "New Subfolder", () => _showFolderDialog(project.id, folder.id)),
+          _buildActionIcon(Icons.delete_outline, "Delete Folder", () => _deleteCollection(folder.id)),
+        ],
+      ),
       children: [
         // 1. Render Subfolders (Recursive Call)
         ...folder.subFolders.map((sub) => _buildRecursiveFolder(project, sub)),
@@ -111,7 +118,89 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     );
   }
 
-  // --- ACTIONS & RECURSIVE IMPORT ---
+  // --- MANUAL CREATION DIALOGS ---
+
+  Future<void> _showFolderDialog(String projectId, String? parentId) async {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(parentId == null ? "New Root Folder" : "New Subfolder"),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: "Enter folder name"),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                await _createFolder(projectId, parentId, controller.text);
+                Navigator.pop(context);
+                widget.onRefresh();
+              }
+            },
+            child: const Text("Create"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showRequestDialog(String collectionId) async {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text("New API Request"),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          decoration: const InputDecoration(hintText: "e.g., Get All Users"),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          ElevatedButton(
+            onPressed: () async {
+              if (controller.text.isNotEmpty) {
+                await _createManualRequest(collectionId, controller.text);
+                Navigator.pop(context);
+                widget.onRefresh();
+              }
+            },
+            child: const Text("Create"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- DATABASE OPERATIONS ---
+
+  Future<void> _createFolder(String projectId, String? parentId, String name) async {
+    final db = await DatabaseService.instance.database;
+    await db.insert('collections', {
+      'id': uuid.v4(),
+      'project_id': projectId,
+      'parent_id': parentId,
+      'name': name,
+    });
+  }
+
+  Future<void> _createManualRequest(String collectionId, String name) async {
+    final db = await DatabaseService.instance.database;
+    await db.insert('requests', {
+      'id': uuid.v4(),
+      'collection_id': collectionId,
+      'name': name,
+      'method': 'GET',
+      'url': '',
+      'body': '',
+      'headers': '[]',
+      'query_params': '[]',
+    });
+  }
 
   Future<void> _importPostman(Project project) async {
     try {
@@ -128,7 +217,6 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
       final db = await DatabaseService.instance.database;
 
       await db.transaction((txn) async {
-        // Create root collection node for the import
         final rootId = uuid.v4();
         await txn.insert('collections', {
           'id': rootId,
@@ -136,45 +224,28 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
           'name': data['info']?['name'] ?? "Imported Collection",
           'parent_id': null,
         });
-
-        // Start recursion through the "item" array
         await _saveItemsRecursive(txn, project.id, rootId, data['item'] ?? []);
       });
-
       widget.onRefresh();
     } catch (e) {
       debugPrint("Import Error: $e");
     }
   }
 
-  Future<void> _saveItemsRecursive(
-    dynamic txn, String projId, String parentId, List<dynamic> items
-  ) async {
+  Future<void> _saveItemsRecursive(dynamic txn, String projId, String parentId, List<dynamic> items) async {
     for (var item in items) {
       if (item['item'] != null) {
-        // THIS IS A FOLDER
         final folderId = uuid.v4();
         await txn.insert('collections', {
           'id': folderId,
           'project_id': projId,
           'name': item['name'],
-          'parent_id': parentId, // Links this folder to the parent
+          'parent_id': parentId,
         });
-        // Go deeper
         await _saveItemsRecursive(txn, projId, folderId, item['item']);
       } else if (item['request'] != null) {
-        // THIS IS AN API REQUEST
         final req = item['request'];
-        
-        // Handle URL (Postman URLs can be strings or maps)
-        String urlString = "";
-        if (req['url'] is Map) {
-          urlString = req['url']['raw'] ?? "";
-        } else {
-          urlString = req['url']?.toString() ?? "";
-        }
-
-        // Extract JSON Body
+        String urlString = req['url'] is Map ? (req['url']['raw'] ?? "") : (req['url']?.toString() ?? "");
         String bodyString = "";
         if (req['body'] != null && req['body']['mode'] == 'raw') {
           bodyString = req['body']['raw'] ?? "";
@@ -194,8 +265,6 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     }
   }
 
-  // --- DATABASE HELPERS ---
-
   Future<void> _deleteProject(String id) async {
     final db = await DatabaseService.instance.database;
     await db.delete('projects', where: 'id = ?', whereArgs: [id]);
@@ -207,6 +276,8 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     await db.delete('collections', where: 'id = ?', whereArgs: [id]);
     widget.onRefresh();
   }
+
+  // --- HELPERS ---
 
   Widget _buildActionIcon(IconData icon, String tooltip, VoidCallback onTap) {
     return IconButton(

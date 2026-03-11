@@ -34,10 +34,10 @@ class DatabaseService {
     ''');
 
     await db.execute('''
-      CREATE TABLE collections (
+   CREATE TABLE IF NOT EXISTS collections (
   id TEXT PRIMARY KEY,
   project_id TEXT,
-  parent_id TEXT, -- Allows a collection to be a child of another collection
+  parent_id TEXT, -- Key for nested folders
   name TEXT,
   FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE
 );
