@@ -65,7 +65,7 @@ class _RequestListPageState extends State<RequestListPage> {
                 url: "",
                 headersList: [],
                 body: "",
-                queryParamsList: [],
+                
               );
 
               await hiveService.addRequest(
