@@ -1,6 +1,6 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'dart:convert';
 import '../../models/request_model.dart';
 import '../../models/header_item.dart';
 
@@ -8,11 +8,7 @@ class RequestEditor extends StatefulWidget {
   final RequestModel request;
   final VoidCallback onSave;
 
-  const RequestEditor({
-    super.key, 
-    required this.request, 
-    required this.onSave
-  });
+  const RequestEditor({super.key, required this.request, required this.onSave});
 
   @override
   State<RequestEditor> createState() => _RequestEditorState();
@@ -22,7 +18,6 @@ class _RequestEditorState extends State<RequestEditor> {
   late TextEditingController _urlController;
   late TextEditingController _bodyController;
 
-  // Response States
   bool _isSending = false;
   String? _responseBody;
   int? _statusCode;
@@ -33,8 +28,6 @@ class _RequestEditorState extends State<RequestEditor> {
     super.initState();
     _urlController = TextEditingController(text: widget.request.url);
     _bodyController = TextEditingController(text: widget.request.body);
-    
-    // Safety initialization for Hive nested lists
     widget.request.headersList ??= [];
     widget.request.queryParamsList ??= [];
   }
@@ -46,177 +39,70 @@ class _RequestEditorState extends State<RequestEditor> {
     super.dispose();
   }
 
-  // --- CORE LOGIC: PERSISTENCE & SYNC ---
+  // --- LOGIC ---
 
   void _saveRequest() {
     widget.request.url = _urlController.text;
     widget.request.body = _bodyController.text;
-    widget.onSave(); // Triggers Project.save() in MainPage
+    widget.onSave();
   }
 
-  void _onUrlChanged(String value) {
-    widget.request.url = value;
-    try {
-      final uri = Uri.parse(value);
-      if (uri.hasQuery) {
-        setState(() {
-          widget.request.queryParamsList = uri.queryParameters.entries
-              .map((e) => HeaderItem(key: e.key, value: e.value))
-              .toList();
-        });
-      }
-    } catch (_) {}
-    _saveRequest();
-  }
-
-  void _syncUrlFromParams() {
-    try {
-      final baseUri = Uri.parse(_urlController.text.split('?')[0]);
-      final Map<String, String> params = {
-        for (var item in widget.request.queryParamsList!)
-          if (item.key.isNotEmpty) item.key: item.value
-      };
-
-      final newUri = baseUri.replace(queryParameters: params.isEmpty ? null : params);
-      
-      setState(() {
-        _urlController.text = Uri.decodeFull(newUri.toString());
-        widget.request.url = _urlController.text;
-      });
-      _saveRequest();
-    } catch (_) {}
-  }
-
-  // --- NETWORK EXECUTION ---
-
-  Future<void> _sendRequest() async {
-    setState(() {
-      _isSending = true;
-      _responseBody = null;
-    });
-
-    final stopwatch = Stopwatch()..start();
-    _saveRequest();
-
-    try {
-      final url = Uri.parse(widget.request.url);
-      final headers = {
-        for (var item in widget.request.headersList!)
-          if (item.key.isNotEmpty) item.key: item.value,
-        'Content-Type': 'application/json',
-      };
-
-      http.Response response;
-      
-      // Dynamic Method Handling
-      switch (widget.request.method.toUpperCase()) {
-        case 'POST':
-          response = await http.post(url, headers: headers, body: widget.request.body);
-          break;
-        case 'PUT':
-          response = await http.put(url, headers: headers, body: widget.request.body);
-          break;
-        case 'DELETE':
-          response = await http.delete(url, headers: headers);
-          break;
-        default: // GET
-          response = await http.get(url, headers: headers);
-      }
-
-      stopwatch.stop();
-      setState(() {
-        _statusCode = response.statusCode;
-        // Attempt to pretty-print JSON if possible
-        try {
-          final decoded = json.decode(response.body);
-          _responseBody = const JsonEncoder.withIndent('  ').convert(decoded);
-        } catch (_) {
-          _responseBody = response.body;
-        }
-        _responseTime = "${stopwatch.elapsedMilliseconds} ms";
-      });
-    } catch (e) {
-      setState(() {
-        _statusCode = 0;
-        _responseBody = "Network Error: ${e.toString()}";
-        _responseTime = "0 ms";
-      });
-    } finally {
-      setState(() => _isSending = false);
-    }
-  }
-
-  // --- UI BUILDING ---
+  // --- UI COMPONENTS ---
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _buildAddressBar(),
-        Expanded(
-          flex: 2, 
-          child: DefaultTabController(
-            length: 3,
-            child: Column(
-              children: [
-                const TabBar(
-                  isScrollable: true,
-                  labelColor: Colors.blueAccent,
-                  indicatorColor: Colors.blueAccent,
-                  tabs: [Tab(text: "Params"), Tab(text: "Headers"), Tab(text: "Body")],
-                ),
-                const Divider(height: 1),
-                Expanded(
-                  child: TabBarView(
-                    children: [
-                      _buildKeyValueTable(widget.request.queryParamsList!, isParams: true),
-                      _buildKeyValueTable(widget.request.headersList!, isParams: false),
-                      _buildBodyEditor(),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+    return Container(
+      color: Theme.of(context).scaffoldBackgroundColor,
+      child: Column(
+        children: [
+          _buildAddressBar(),
+          const Divider(height: 1),
+          Expanded(
+            flex: 3,
+            child: _buildConfigTabs(),
           ),
-        ),
-        const Divider(height: 1, thickness: 1),
-        Expanded(
-          flex: 1, 
-          child: _buildResponsePanel(),
-        ),
-      ],
+          const Divider(height: 1, thickness: 2),
+          Expanded(
+            flex: 2,
+            child: _buildResponsePanel(),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildAddressBar() {
     return Padding(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.all(12.0),
       child: Row(
         children: [
           _buildMethodDropdown(),
+          const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              controller: _urlController,
-              onChanged: _onUrlChanged,
-              decoration: const InputDecoration(
-                hintText: "https://api.example.com",
-                border: OutlineInputBorder(borderRadius: BorderRadius.zero),
-                contentPadding: EdgeInsets.symmetric(horizontal: 12),
+            child: Container(
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(color: Colors.white12),
+              ),
+              child: TextField(
+                controller: _urlController,
+                style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                decoration: const InputDecoration(
+                  hintText: "Enter URL or paste text",
+                  border: InputBorder.none,
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                onChanged: (val) {
+                  widget.request.url = val;
+                  _saveRequest();
+                },
               ),
             ),
           ),
           const SizedBox(width: 8),
-          ElevatedButton(
-            onPressed: _isSending ? null : _sendRequest,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.blueAccent,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-            ),
-            child: _isSending 
-              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Text("Send"),
-          ),
+          _buildSendButton(),
         ],
       ),
     );
@@ -224,55 +110,102 @@ class _RequestEditorState extends State<RequestEditor> {
 
   Widget _buildMethodDropdown() {
     return Container(
+      height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
-        borderRadius: const BorderRadius.only(topLeft: Radius.circular(4), bottomLeft: Radius.circular(4)),
+        color: _getMethodColor(widget.request.method).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: _getMethodColor(widget.request.method).withOpacity(0.3)),
       ),
-      child: DropdownButton<String>(
-        value: widget.request.method,
-        underline: const SizedBox(),
-        items: ["GET", "POST", "PUT", "DELETE", "PATCH"]
-            .map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontWeight: FontWeight.bold))))
-            .toList(),
-        onChanged: (val) {
-          setState(() => widget.request.method = val!);
-          _saveRequest();
-        },
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: widget.request.method,
+          style: TextStyle(color: _getMethodColor(widget.request.method), fontWeight: FontWeight.bold, fontSize: 12),
+          items: ["GET", "POST", "PUT", "DELETE", "PATCH"]
+              .map((m) => DropdownMenuItem(value: m, child: Text(m)))
+              .toList(),
+          onChanged: (val) {
+            setState(() => widget.request.method = val!);
+            _saveRequest();
+          },
+        ),
       ),
     );
   }
 
-  Widget _buildKeyValueTable(List<HeaderItem> items, {required bool isParams}) {
+  Widget _buildSendButton() {
+    return SizedBox(
+      height: 40,
+      child: ElevatedButton(
+        onPressed: _isSending ? null : _sendRequest,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blueAccent,
+          foregroundColor: Colors.white,
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        ),
+        child: _isSending 
+          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+          : const Text("Send", style: TextStyle(fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  Widget _buildConfigTabs() {
+    return DefaultTabController(
+      length: 3,
+      child: Column(
+        children: [
+          TabBar(
+            isScrollable: true,
+            labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            unselectedLabelStyle: const TextStyle(fontSize: 12),
+            indicatorSize: TabBarIndicatorSize.label,
+            indicatorWeight: 3,
+            tabs: const [Tab(text: "Params"), Tab(text: "Headers"), Tab(text: "Body")],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                _buildTable(widget.request.queryParamsList!),
+                _buildTable(widget.request.headersList!),
+                _buildMonospaceEditor(),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTable(List<HeaderItem> items) {
     return ListView.builder(
       itemCount: items.length + 1,
       itemBuilder: (context, index) {
-        final bool isLast = index == items.length;
+        final isLast = index == items.length;
         final item = isLast ? HeaderItem(key: '', value: '') : items[index];
 
         return Container(
-          decoration: BoxDecoration(border: Border(bottom: BorderSide(color: Colors.grey.shade200))),
+          height: 35,
+          decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Colors.white10))),
           child: Row(
             children: [
-              _buildTableCell(item.key, "Key", (val) {
-                if (isLast && val.isNotEmpty) {
-                  setState(() => items.add(HeaderItem(key: val, value: '')));
-                } else {
-                  item.key = val;
-                }
-                isParams ? _syncUrlFromParams() : _saveRequest();
+              _buildCell(item.key, "Key", (v) {
+                if (isLast && v.isNotEmpty) setState(() => items.add(HeaderItem(key: v, value: '')));
+                else item.key = v;
+                _saveRequest();
               }),
               const VerticalDivider(width: 1),
-              _buildTableCell(item.value, "Value", (val) {
-                item.value = val;
-                isParams ? _syncUrlFromParams() : _saveRequest();
+              _buildCell(item.value, "Value", (v) {
+                item.value = v;
+                _saveRequest();
               }),
-              IconButton(
-                icon: const Icon(Icons.close, size: 14),
-                onPressed: isLast ? null : () {
-                  setState(() => items.removeAt(index));
-                  isParams ? _syncUrlFromParams() : _saveRequest();
-                },
+              SizedBox(
+                width: 30,
+                child: !isLast ? IconButton(
+                  icon: const Icon(Icons.close, size: 14),
+                  onPressed: () => setState(() => items.removeAt(index)),
+                ) : null,
               ),
             ],
           ),
@@ -281,52 +214,52 @@ class _RequestEditorState extends State<RequestEditor> {
     );
   }
 
-  Widget _buildTableCell(String value, String hint, Function(String) onChanged) {
+  Widget _buildCell(String val, String hint, Function(String) onCHanged) {
     return Expanded(
       child: TextField(
-        controller: TextEditingController(text: value)..selection = TextSelection.collapsed(offset: value.length),
-        onChanged: onChanged,
-        decoration: InputDecoration(hintText: hint, contentPadding: const EdgeInsets.all(12), border: InputBorder.none),
+        controller: TextEditingController(text: val)..selection = TextSelection.collapsed(offset: val.length),
+        onChanged: onCHanged,
+        style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: const TextStyle(fontSize: 11, color: Colors.grey),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+          border: InputBorder.none,
+        ),
       ),
     );
   }
 
-  Widget _buildBodyEditor() {
-    return Padding(
-      padding: const EdgeInsets.all(8.0),
+  Widget _buildMonospaceEditor() {
+    return Container(
+      color: Colors.black.withOpacity(0.02),
+      padding: const EdgeInsets.all(12),
       child: TextField(
         controller: _bodyController,
         maxLines: null,
-        expands: true,
         onChanged: (_) => _saveRequest(),
-        style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
-        decoration: const InputDecoration(
-          hintText: '{ "example": "json" }',
-          border: OutlineInputBorder(),
-          fillColor: Color(0xFFF5F5F5),
-          filled: true,
-        ),
+        style: const TextStyle(fontFamily: 'monospace', fontSize: 13, height: 1.5),
+        decoration: const InputDecoration(border: InputBorder.none, hintText: '// Raw JSON Body'),
       ),
     );
   }
 
   Widget _buildResponsePanel() {
     if (_isSending) return const Center(child: CircularProgressIndicator());
-    if (_responseBody == null) return const Center(child: Text("Hit Send to see a response", style: TextStyle(color: Colors.grey)));
+    if (_responseBody == null) return const Center(child: Text("Ready", style: TextStyle(color: Colors.grey, fontSize: 12)));
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          color: Colors.grey[100],
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          color: Colors.black.withOpacity(0.05),
           child: Row(
             children: [
-              const Text("Status: "),
-              Text("$_statusCode", style: TextStyle(color: _statusCode! < 400 ? Colors.green : Colors.red, fontWeight: FontWeight.bold)),
-              const SizedBox(width: 20),
-              const Text("Time: "),
-              Text(_responseTime!, style: const TextStyle(color: Colors.blue)),
+              _statusChip(),
+              const SizedBox(width: 12),
+              Text(_responseTime ?? "", style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+              const Spacer(),
+              IconButton(icon: const Icon(Icons.copy, size: 14), onPressed: () {}),
             ],
           ),
         ),
@@ -335,14 +268,74 @@ class _RequestEditorState extends State<RequestEditor> {
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             child: SingleChildScrollView(
-              child: SelectableText(
-                _responseBody!,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-              ),
+              child: SelectableText(_responseBody!, style: const TextStyle(fontFamily: 'monospace', fontSize: 12)),
             ),
           ),
         ),
       ],
     );
+  }
+
+  Widget _statusChip() {
+    final success = _statusCode != null && _statusCode! < 400;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: success ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(
+        "$_statusCode ${_getStatusText(_statusCode!)}",
+        style: TextStyle(color: success ? Colors.green : Colors.red, fontSize: 11, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+
+  // --- NETWORK ---
+
+  Future<void> _sendRequest() async {
+    setState(() => _isSending = true);
+    final sw = Stopwatch()..start();
+    try {
+      final uri = Uri.parse(_urlController.text);
+      final headers = {for (var h in widget.request.headersList!) if (h.key.isNotEmpty) h.key: h.value};
+      
+      http.Response res;
+      if (widget.request.method == "POST") res = await http.post(uri, headers: headers, body: _bodyController.text);
+      else if (widget.request.method == "PUT") res = await http.put(uri, headers: headers, body: _bodyController.text);
+      else if (widget.request.method == "DELETE") res = await http.delete(uri, headers: headers);
+      else res = await http.get(uri, headers: headers);
+
+      _statusCode = res.statusCode;
+      _responseTime = "${sw.elapsedMilliseconds}ms";
+      try {
+        _responseBody = const JsonEncoder.withIndent('  ').convert(json.decode(res.body));
+      } catch (_) {
+        _responseBody = res.body;
+      }
+    } catch (e) {
+      _responseBody = e.toString();
+      _statusCode = 500;
+    } finally {
+      setState(() => _isSending = false);
+    }
+  }
+
+  Color _getMethodColor(String m) {
+    switch (m) {
+      case "GET": return Colors.green;
+      case "POST": return Colors.blue;
+      case "DELETE": return Colors.red;
+      case "PUT": return Colors.orange;
+      default: return Colors.purple;
+    }
+  }
+
+  String _getStatusText(int code) {
+    if (code == 200) return "OK";
+    if (code == 201) return "Created";
+    if (code == 401) return "Unauthorized";
+    if (code == 404) return "Not Found";
+    return "";
   }
 }
