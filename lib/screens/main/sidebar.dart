@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
-import 'package:wire_touch/core/services/transferservice.dart';
 import '../../models/project.dart';
 import '../../models/collection.dart';
-import '../../models/request_model.dart';// The Export logic we built
+import '../../models/request_model.dart';
+import '../../core/services/database_service.dart'; // Our new SQL service
 
 class ProjectSidebar extends StatefulWidget {
   final List<Project> projects;
-  // Change this line:
-  final Function(Project, RequestModel) onRequestSelected; 
+  final Function(Project, RequestModel) onRequestSelected;
   final VoidCallback onRefresh;
 
   const ProjectSidebar({
@@ -21,6 +20,7 @@ class ProjectSidebar extends StatefulWidget {
   @override
   State<ProjectSidebar> createState() => _ProjectSidebarState();
 }
+
 class _ProjectSidebarState extends State<ProjectSidebar> {
   final uuid = const Uuid();
 
@@ -35,13 +35,11 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     );
   }
 
-  // 1. PROJECT LEVEL
   Widget _buildProjectTile(Project project) {
     return ExpansionTile(
       key: PageStorageKey(project.id),
       leading: const Icon(Icons.workspaces_outline, size: 20, color: Colors.blueAccent),
       title: Text(project.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-      trailing: _buildProjectMenu(project),
       children: [
         ...project.collections.map((col) => _buildCollectionTile(project, col)),
         _buildAddButton("Add Collection", () => _addNewCollection(project)),
@@ -49,64 +47,62 @@ class _ProjectSidebarState extends State<ProjectSidebar> {
     );
   }
 
-  // 2. COLLECTION LEVEL
-  // 1. Update the Collection Tile helper
-Widget _buildCollectionTile(Project project, Collection collection) {
-  return ExpansionTile(
-    key: PageStorageKey(collection.id),
-    title: Text(collection.name),
-    children: [
-      // Pass 'project' into the next helper
-      ...collection.requests.map((req) => _buildRequestTile(project, req)), 
-      _buildAddButton("Add Request", () => _addNewRequest(project, collection)),
-    ],
-  );
-}
-
-// 2. Update the Request Tile helper
-Widget _buildRequestTile(Project project, RequestModel request) {
-  return ListTile(
-    contentPadding: const EdgeInsets.only(left: 56),
-    leading: Text(
-      request.method,
-      style: TextStyle(
-        fontSize: 10,
-        fontWeight: FontWeight.bold,
-        color: _getMethodColor(request.method),
-      ),
-    ),
-    title: Text(request.name, style: const TextStyle(fontSize: 13)),
-    onTap: () {
-      // FIXED: Pass both the project and the request
-      widget.onRequestSelected(project, request);
-    },
-  );
-}
-
-  // --- HELPER UI ELEMENTS ---
-
-  Widget _buildProjectMenu(Project project) {
-    return PopupMenuButton<String>(
-      icon: const Icon(Icons.more_vert, size: 18),
-      onSelected: (value) async {
-        if (value == 'export') {
-          await TransferService.exportProject(project);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("Project Exported Successfully")),
-            );
-          }
-        } else if (value == 'delete') {
-          // Add your hive delete logic here
-          widget.onRefresh();
-        }
-      },
-      itemBuilder: (context) => [
-        const PopupMenuItem(value: 'export', child: Text("Export JSON")),
-        const PopupMenuItem(value: 'delete', child: Text("Delete Project", style: TextStyle(color: Colors.red))),
+  Widget _buildCollectionTile(Project project, Collection collection) {
+    return ExpansionTile(
+      key: PageStorageKey(collection.id),
+      title: Text(collection.name, style: const TextStyle(fontSize: 14)),
+      children: [
+        ...collection.requests.map((req) => _buildRequestTile(project, req)),
+        _buildAddButton("Add Request", () => _addNewRequest(project, collection), indent: 48),
       ],
     );
   }
+
+  Widget _buildRequestTile(Project project, RequestModel request) {
+    return ListTile(
+      contentPadding: const EdgeInsets.only(left: 56),
+      leading: Text(
+        request.method,
+        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _getMethodColor(request.method)),
+      ),
+      title: Text(request.name, style: const TextStyle(fontSize: 13)),
+      onTap: () => widget.onRequestSelected(project, request),
+    );
+  }
+
+  // --- SQL LOGIC ---
+
+  Future<void> _addNewCollection(Project project) async {
+    final db = await DatabaseService.instance.database;
+    final newId = uuid.v4();
+    
+    await db.insert('collections', {
+      'id': newId,
+      'project_id': project.id,
+      'name': "New Collection",
+    });
+
+    widget.onRefresh(); // Refresh the main page data from SQL
+  }
+
+  Future<void> _addNewRequest(Project project, Collection collection) async {
+    final db = await DatabaseService.instance.database;
+    final newId = uuid.v4();
+
+    await db.insert('requests', {
+      'id': newId,
+      'collection_id': collection.id,
+      'name': "New Request",
+      'method': "GET",
+      'url': "",
+      'headers': '[]', // Initializing as empty JSON lists
+      'query_params': '[]',
+    });
+
+    widget.onRefresh();
+  }
+
+  // --- UI HELPERS ---
 
   Widget _buildAddButton(String label, VoidCallback onTap, {double indent = 32}) {
     return ListTile(
@@ -118,45 +114,12 @@ Widget _buildRequestTile(Project project, RequestModel request) {
     );
   }
 
-  // --- LOGIC: ADDING ITEMS ---
-
-  void _addNewCollection(Project project) {
-  setState(() {
-    project.collections.add(Collection(
-      id: uuid.v4(),
-      name: "New Collection",
-      requests: [],
-    ));
-  });
-
-  // Save the project which is the object in the box
-  project.save();
-}
-
-  // Update this signature in _ProjectSidebarState
-void _addNewRequest(Project project, Collection collection) {
-  final newRequest = RequestModel(
-    id: uuid.v4(),
-    name: "New Request",
-    method: "GET",
-    url: "",
-  );
-
-  setState(() {
-    collection.requests.add(newRequest);
-  });
-
-  // FIXED: Save the project root so Hive knows where to store the data
-  project.save(); 
-}
-
   Color _getMethodColor(String method) {
     switch (method.toUpperCase()) {
       case "GET": return Colors.green;
       case "POST": return Colors.blue;
-      case "PUT": return Colors.orange;
       case "DELETE": return Colors.red;
-      default: return Colors.grey;
+      default: return Colors.orange;
     }
   }
 }

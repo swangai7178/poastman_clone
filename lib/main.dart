@@ -1,25 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:wire_touch/models/header_item.dart';
 
 import 'screens/main/main_page.dart';
 import 'models/project.dart';
-import 'models/collection.dart';
-import 'models/request_model.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Hive
-  await Hive.initFlutter();
 
-  // Register Hive Adapters
-  Hive.registerAdapter(ProjectAdapter());
-  Hive.registerAdapter(CollectionAdapter());
-  Hive.registerAdapter(RequestModelAdapter());
-  Hive.registerAdapter(HeaderItemAdapter());
-
-  // Open boxes
+  // 3. Open your Boxes
   await Hive.openBox<Project>('projects');
   await Hive.openBox('history');
 
